@@ -1,6 +1,4 @@
-import colorDiff, { diff } from 'color-diff'
-
-type Color = {
+export type Color = {
   R: number
   G: number
   B: number
@@ -89,6 +87,16 @@ const ALL_COLORS_WITH_IDS = [...ALL_COLORS.entries()].map(([i, color]) => ({ col
 
 type ColorAndID = { color: Color, id: number }
 
+function getSimilarity(color1: Color, color2: Color): number {
+  // https://stackoverflow.com/a/9085524
+  const rMean = (color1.R + color2.R) / 2
+  const rDelta = color1.R - color2.R
+  const gDelta = color1.G - color2.G
+  const bDelta = color1.B - color2.B
+
+  return (((512 + rMean) * rDelta ** 2) >> 8) + 4 * gDelta ** 2 + (((767 - rMean) * bDelta ** 2) >> 8)
+}
+
 const cache = new Map<string, ColorAndID>()
 export function findClosestColor(color: Color): ColorAndID {
   const colorStr = JSON.stringify(color)
@@ -103,29 +111,19 @@ export function findClosestColor(color: Color): ColorAndID {
    * Not in cache.
    * Find the closest color, then return it.
    */
-  let bestId = ALL_COLORS_WITH_IDS[0].id
-  let bestColor = ALL_COLORS_WITH_IDS[0].color
-  let bestSimilarity = 999999
+  let bestIndex = 0
+  let bestSimilarity = getSimilarity(color, ALL_COLORS[0])
 
-  for (const { id, color: mcColor } of ALL_COLORS_WITH_IDS) {
-    const rMean = (color.R + mcColor.R) / 2
-    const rDelta = color.R - mcColor.R
-    const gDelta = color.G - mcColor.G
-    const bDelta = color.B - mcColor.B
-
-    // https://stackoverflow.com/a/9085524
-    const similarity = (((512 + rMean) * rDelta ** 2) >> 8) + 4 * gDelta ** 2 + (((767 - rMean) * bDelta ** 2) >> 8)
+  for (let i = 1; i < ALL_COLORS_WITH_IDS.length; i += 1) {
+    const mcColor = ALL_COLORS[i]
+    const similarity = getSimilarity(color, mcColor)
     if (similarity < bestSimilarity) {
-      bestId = id
-      bestColor = mcColor
+      bestIndex = i
       bestSimilarity = similarity
     }
   }
 
-  const result = {
-    color: bestColor,
-    id: bestId,
-  }
+  const result = ALL_COLORS_WITH_IDS[bestIndex]
 
   // Set in cache
   cache.set(colorStr, result)
