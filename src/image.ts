@@ -1,8 +1,13 @@
 import jimp from 'jimp'
 import hash from 'object-hash'
-import { summon } from 'sandstone/commands'
-import { relative } from 'sandstone/_internals'
+import { data, execute, summon } from 'sandstone/commands'
+import { MCFunction } from 'sandstone/core'
+import type { MCFunctionInstance } from 'sandstone/types'
+import { Selector } from 'sandstone/variables'
+import { nbtParser, relative, _ } from 'sandstone/_internals'
+import { MCFunctionClass } from 'sandstone/_internals/resources'
 import { NBT } from 'sandstone/_internals/variables/NBTs'
+import { v4 as uuidv4 } from 'uuid'
 import type { Color } from './colors'
 import { findClosestColor } from './colors'
 
@@ -91,6 +96,8 @@ function slice<T>(array: T[][], fromHeight: number, toHeight: number, fromWidth:
 }
 
 export class MediaScreen {
+  static screenId = 0
+
   static mapId = 22_000
 
   static cache = new Map<string, number>()
@@ -101,9 +108,17 @@ export class MediaScreen {
 
   facing
 
+  id
+
+  summonScreen: MCFunctionInstance<void>
+
+  itemFrames: { selectorUUID: string; nbtUUID: number[] }[][]
+
   constructor(width: number, height: number, facing: 'east' | 'west' | 'south' | 'north' | 'top' | 'bottom') {
     this.width = width
     this.height = height
+    this.id = MediaScreen.screenId
+    MediaScreen.screenId += 1
 
     //  3 is south, 4 is west, 2 is north, 5 is east, 1 is top, and 0 is bottom.
     this.facing = {
@@ -114,6 +129,29 @@ export class MediaScreen {
       top: 1,
       bottom: 0,
     }[facing]
+
+    this.itemFrames = create2dArray(this.height, this.width, 0).map((itemFramesRow) => itemFramesRow.map(() => {
+      const uuid = uuidv4()
+
+      const uuidArray = [0, 0, 0, 0].map((_, i) => parseInt(uuid.replace(/-/g, '').substr(i * 8, 8), 16)).map((x) => (x < 2 ** 31 ? x : x - 2 ** 32))
+
+      return {
+        selectorUUID: uuid,
+        nbtUUID: uuidArray,
+      }
+    }))
+
+    this.summonScreen = MCFunction(`summon_screen_${this.id}`, () => {
+      this.itemFrames.forEach((itemFramesRow, row) => itemFramesRow.forEach((itemFrame, col) => {
+        summon('minecraft:item_frame', relative(this.width - col - 1, this.height - row - 1, 0), {
+          UUID: NBT.integerArray(itemFrame.nbtUUID),
+          Fixed: NBT.byte(1),
+          Invisible: NBT.byte(1),
+          Facing: NBT.byte(this.facing),
+          Silent: NBT.byte(1),
+        })
+      }))
+    })
   }
 
   private async getMapId(pixelsColorIds: number[]) {
@@ -203,15 +241,14 @@ export class MediaScreen {
   }
 
     _displayMaps = (maps: (number | null)[][]) => {
+      execute.unlessEntity(this.itemFrames[0][0].selectorUUID).run(() => this.summonScreen())
+
       maps.forEach((mapsLine, row) => mapsLine.forEach((mapId, col) => {
         if (mapId === null || mapId === undefined) { return }
 
-        summon('minecraft:item_frame', relative(this.width - col - 1, this.height - row - 1, 0), {
-          Item: { id: 'minecraft:filled_map', Count: NBT.byte(1), tag: { map: mapId } },
-          Fixed: NBT.byte(1),
-          Invisible: NBT.byte(1),
-          Facing: NBT.byte(this.facing),
-        })
+        const { selectorUUID } = this.itemFrames[row][col]
+
+        data.merge.entity(selectorUUID, nbtParser({ Item: { id: 'minecraft:filled_map', Count: NBT.byte(1), tag: { map: mapId } } }))
       }))
     }
 }
